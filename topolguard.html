@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>TopolGuard | 3D Mesh Inspector</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/BufferGeometryUtils.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  :root {
+    --bg:      #232323;
+    --panel:   #2b2b2b;
+    --panel2:  #1e1e1e;
+    --header:  #333333;
+    --border:  #1a1a1a;
+    --border2: #3a3a3a;
+    --text:    #dbdbdb;
+    --dim:     #888888;
+    --accent:  #e87d3e;
+    --error:   #cf4b4b;
+    --warn:    #d9a336;
+    --ok:      #62a353;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', sans-serif; display: flex; flex-direction: row-reverse; height: 100vh; overflow: hidden; font-size: 13px; }
+
+  /* ── SIDEBAR ── */
+  #sidebar { width: 300px; min-width: 300px; background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; z-index: 10; }
+  #sidebar-header { padding: 14px 16px; border-bottom: 1px solid var(--border); background: var(--header); flex-shrink: 0; }
+  .logo { font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 700; letter-spacing: 1px; color: var(--text); }
+  .logo span { color: var(--accent); }
+  .logo-sub { font-size: 10px; color: var(--dim); margin-top: 2px; letter-spacing: 0; }
+  #sidebar-body { flex: 1; overflow-y: auto; padding: 12px; }
+  #sidebar-body::-webkit-scrollbar { width: 4px; }
+  #sidebar-body::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+  #sidebar-body { scrollbar-width: thin; scrollbar-color: var(--border2) transparent; }
+
+  /* ── SECTIONS ── */
+  .section-title { font-size: 11px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: 0.5px; margin: 14px 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+
+  /* ── STAT CARDS ── */
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .stat-card { background: var(--panel2); border: 1px solid var(--border); border-radius: 2px; padding: 8px 10px; }
+  .stat-card.full { grid-column: 1 / -1; }
+  .stat-label { font-size: 10px; font-weight: 600; color: var(--dim); text-transform: uppercase; margin-bottom: 3px; }
+  .stat-value { font-family: 'Consolas', 'Courier New', monospace; font-size: 18px; font-weight: 700; color: var(--text); line-height: 1; }
+
+  /* ── ISSUE LIST ── */
+  #issue-list { margin-top: 2px; }
+  .issue-item { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; background: var(--panel2); border-radius: 2px; margin-bottom: 2px; border-left: 2px solid transparent; font-size: 12px; line-height: 1.4; }
+  .issue-item.error { border-left-color: var(--error); }
+  .issue-item.warn  { border-left-color: var(--warn); }
+  .issue-item.ok    { border-left-color: var(--ok); }
+  .issue-icon { font-size: 12px; flex-shrink: 0; margin-top: 1px; }
+  .issue-count { color: var(--dim); font-size: 11px; font-family: 'Consolas', monospace; }
+
+  /* ── FOOTER ── */
+  #sidebar-footer { padding: 12px; flex-shrink: 0; border-top: 1px solid var(--border); }
+  #upload-btn { display: block; width: 100%; padding: 10px; background: var(--accent); border: none; color: #fff; font-family: 'Inter', sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.5px; cursor: pointer; text-align: center; border-radius: 3px; transition: background 0.15s; }
+  #upload-btn:hover { background: #d4702f; }
+  #progress-wrap { margin-bottom: 8px; display: none; }
+  #progress-bar { height: 2px; background: var(--border2); border-radius: 1px; overflow: hidden; }
+  #progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s; }
+  #progress-label { font-size: 11px; color: var(--dim); margin-top: 4px; }
+
+  /* ── VIEWPORT ── */
+  #viewport { flex: 1; position: relative; background: var(--bg); overflow: hidden; }
+  #viewport canvas { display: block; }
+  #hud { position: absolute; top: 12px; left: 12px; font-size: 11px; color: var(--dim); pointer-events: none; background: rgba(0,0,0,0.35); padding: 8px 10px; border-radius: 3px; line-height: 1.7; }
+  #drop-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--dim); pointer-events: none; transition: opacity 0.3s; }
+  #drop-overlay.hidden { opacity: 0; }
+  .drop-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.25; }
+  .drop-text { font-size: 14px; font-weight: 500; color: var(--dim); letter-spacing: 1px; }
+  .drop-sub { font-size: 11px; color: var(--border2); margin-top: 6px; }
+  #viewport.drag-hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+  #viewport.drag-hover #drop-overlay { opacity: 1 !important; }
+  #viewport.drag-hover .drop-icon { opacity: 0.6; }
+  #view-modes { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; background: var(--panel); border: 1px solid var(--border2); border-radius: 3px; padding: 4px; }
+  .view-btn { padding: 5px 14px; background: transparent; border: 1px solid transparent; color: var(--dim); font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 500; cursor: pointer; border-radius: 2px; transition: all 0.1s; position: relative; }
+  .view-btn.active { background: var(--border2); border-color: var(--border2); color: var(--text); }
+  .view-btn:hover:not(.active) { color: var(--text); background: rgba(255,255,255,0.05); }
+
+  /* ── TOGGLE BUTTONS ── */
+  .tog-btn { display:flex; align-items:center; gap:6px; padding:6px 9px; background:var(--panel2); border:1px solid var(--border); border-radius:2px; color:var(--dim); font-family:'Inter',sans-serif; font-size:11px; cursor:pointer; transition:all 0.15s; width:100%; margin-bottom:2px; }
+  .tog-btn.active { border-color: var(--border2); color: var(--text); }
+  .tog-btn:not(.active) { opacity: 0.45; }
+  .tog-btn:not(.active) .tog-label { text-decoration: line-through; text-decoration-color: var(--dim); }
+  .tog-btn .dot { width:8px; height:8px; border-radius:1px; flex-shrink:0; transition: background 0.15s, box-shadow 0.15s; }
+  .tog-btn .dot.round { border-radius:50%; }
+  .tog-btn.active .dot { box-shadow: 0 0 5px 1px currentColor; }
+  .tog-btn:not(.active) .dot { background: var(--dim) !important; box-shadow: none; }
+  .tog-status { margin-left:auto; font-size:9px; font-weight:600; padding:1px 5px; border-radius:2px; letter-spacing:0.5px; flex-shrink:0; }
+  .tog-btn.active .tog-status { background: rgba(232,125,62,0.15); color: var(--accent); }
+  .tog-btn:not(.active) .tog-status { background: rgba(136,136,136,0.15); color: var(--dim); }
+
+  /* ── TOAST POPUP ── */
+  #toast-container { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+  .toast { pointer-events: auto; display: flex; align-items: flex-start; gap: 10px; padding: 12px 16px; border-radius: 4px; font-family: 'Inter', sans-serif; font-size: 12px; line-height: 1.5; max-width: 480px; min-width: 320px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); animation: toast-in 0.3s ease-out; border: 1px solid var(--border2); }
+  .toast.error   { background: #3a1c1c; border-left: 3px solid var(--error); color: #f0a0a0; }
+  .toast.warn    { background: #3a2e1c; border-left: 3px solid var(--warn); color: #f0d8a0; }
+  .toast.info    { background: #1c2a3a; border-left: 3px solid #5b9bd5; color: #a0c8f0; }
+  .toast.success { background: #1c3a22; border-left: 3px solid var(--ok); color: #a0f0b0; }
+  .toast-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .toast-body { flex: 1; }
+  .toast-title { font-weight: 600; margin-bottom: 2px; color: var(--text); }
+  .toast-msg { opacity: 0.85; font-size: 11px; }
+  .toast-close { background: none; border: none; color: var(--dim); cursor: pointer; font-size: 14px; padding: 0 0 0 8px; line-height: 1; }
+  .toast-close:hover { color: var(--text); }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes toast-out { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-12px); } }
+
+  /* ── COLOR THEME PICKER ── */
+  .color-entry { display:flex; align-items:center; gap:8px; padding:5px 8px; background:var(--panel2); border:1px solid var(--border); border-radius:2px; }
+  .color-entry-label { flex:1; font-size:11px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .color-swatch-wrap { position:relative; width:22px; height:22px; flex-shrink:0; }
+  .color-swatch { width:22px; height:22px; border-radius:2px; border:1px solid rgba(255,255,255,0.15); cursor:pointer; transition:transform 0.1s, box-shadow 0.1s; display:block; }
+  .color-swatch:hover { transform:scale(1.12); box-shadow:0 0 6px 2px rgba(255,255,255,0.2); }
+  .color-input-hidden { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; border:none; padding:0; }
+</style>
+</head>
+<body>
+
+<div id="toast-container"></div>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    <div class="logo">Topol<span>Guard</span></div>
+    <div class="logo-sub">3D Mesh Topology Inspector</div>
+  </div>
+  <div id="sidebar-body">
+    <div class="section-title">MESH INFO</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-label">VERTICES</div><div class="stat-value" id="v-count">—</div></div>
+      <div class="stat-card"><div class="stat-label">FACES</div><div class="stat-value" id="f-count">—</div></div>
+      <div class="stat-card"><div class="stat-label">EDGES (est.)</div><div class="stat-value" id="e-count">—</div></div>
+      <div class="stat-card"><div class="stat-label">EULER χ</div><div class="stat-value" id="euler">—</div></div>
+    </div>
+    <div class="section-title">TOPOLOGY ISSUES</div>
+    <div id="issue-list">
+      <div style="font-size:12px; color:var(--dim); text-align:center; padding:24px 0;">
+        <div style="font-size:28px; opacity:0.2; margin-bottom:8px;">⬡</div>
+        <div>.obj 파일을 업로드하세요</div>
+        <div style="font-size:11px; color:var(--border2); margin-top:4px;">Wavefront OBJ 포맷 지원</div>
+      </div>
+    </div>
+    <div class="section-title">BOUNDING BOX</div>
+    <div class="stat-grid">
+      <div class="stat-card full"><div class="stat-label">SIZE (X / Y / Z)</div><div class="stat-value" id="bbox" style="font-size:14px;">—</div></div>
+    </div>
+    <button class="tog-btn active" id="bbox-toggle" style="margin-top:6px;" onclick="toggleBBoxHelper()">
+      <span class="dot" style="background:#e87d3e;border-radius:1px;"></span>
+      <span class="tog-label">바운딩 박스 표시</span>
+      <span class="tog-status" id="bbox-toggle-label">ON</span>
+    </button>
+
+    <div class="section-title">COLOR THEME</div>
+    <div id="color-theme-panel" style="margin-bottom:6px;">
+      <div id="color-entries" style="display:flex; flex-direction:column; gap:3px;"></div>
+      <div style="display:flex; gap:4px; margin-top:6px;">
+        <button onclick="resetColors()" style="flex:1; padding:5px 0; background:var(--panel2); border:1px solid var(--border2); border-radius:2px; color:var(--dim); font-family:'Inter',sans-serif; font-size:10px; font-weight:600; cursor:pointer; letter-spacing:0.5px; transition:color 0.15s;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">↺ RESET</button>
+        <button onclick="randomizeColors()" style="flex:1; padding:5px 0; background:var(--panel2); border:1px solid var(--border2); border-radius:2px; color:var(--dim); font-family:'Inter',sans-serif; font-size:10px; font-weight:600; cursor:pointer; letter-spacing:0.5px; transition:color 0.15s;" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--dim)'">⚄ RANDOM</button>
+      </div>
+    </div>
+    <div class="section-title">OVERLAY</div>
+    <div id="legend-empty" style="font-size:11px; color:var(--dim); padding:4px 0;">파일 업로드 후 표시됩니다</div>
+    <div id="overlay-toggles" style="display:none; margin-top:4px;"></div>
+  </div>
+  <div id="sidebar-footer">
+    <div id="progress-wrap">
+      <div id="progress-bar"><div id="progress-fill"></div></div>
+      <div id="progress-label">분석 중...</div>
+    </div>
+    <label id="upload-btn" for="file-upload">▲ UPLOAD .OBJ</label>
+    <input type="file" id="file-upload" accept=".obj" style="display:none;">
+  </div>
+</div>
+
+<div id="viewport">
+  <div id="drop-overlay">
+    <div class="drop-icon">⬡</div>
+    <div class="drop-text">DROP .OBJ HERE</div>
+    <div class="drop-sub">Wavefront OBJ 포맷 지원</div>
+  </div>
+  <div id="hud"><div>SCROLL — ZOOM</div><div>DRAG — ROTATE</div><div>RIGHT DRAG — PAN</div></div>
+  <div id="view-modes">
+    <button class="view-btn active" id="btn-wire" onclick="setViewMode('wireframe',this)" title="와이어프레임만 표시">WIRE</button>
+    <button class="view-btn" id="btn-solid" onclick="setViewMode('solid',this)" title="솔리드 면만 표시">SOLID</button>
+    <button class="view-btn" id="btn-both" onclick="setViewMode('both',this)" title="와이어프레임 + 솔리드">BOTH</button>
+  </div>
+</div>
+
+<script>
+// ── Toast System ──
+const TOAST_ICONS = { error: '✕', warn: '⚠', info: 'ℹ', success: '✓' };
+function showToast(type, title, msg, duration) {
+  duration = duration || 6000;
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.innerHTML =
+    '<span class="toast-icon">' + TOAST_ICONS[type] + '</span>' +
+    '<div class="toast-body">' +
+      '<div class="toast-title">' + title + '</div>' +
+      (msg ? '<div class="toast-msg">' + msg + '</div>' : '') +
+    '</div>' +
+    '<button class="toast-close" onclick="this.parentElement.remove()">×</button>';
+  container.appendChild(el);
+  if (duration > 0) {
+    setTimeout(function() {
+      el.style.animation = 'toast-out 0.3s ease-in forwards';
+      setTimeout(function() { el.remove(); }, 300);
+    }, duration);
+  }
+  return el;
+}
+
+// ── File Validation ──
+// 제한값 설정
+const MAX_FILE_SIZE_MB = 500;         // 파일 크기 제한 (MB)
+const MAX_VERTEX_COUNT = 3000000;     // 하드 리밋: 300만 버텍스 → 차단
+const WARN_VERTEX_COUNT = 1000000;    // 소프트 리밋: 100만 버텍스 → 경고 후 진행
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+function quickCountVertices(text) {
+  // OBJ 텍스트에서 'v ' 라인만 빠르게 카운트
+  let count = 0;
+  let idx = 0;
+  while (idx < text.length) {
+    const nl = text.indexOf('\n', idx);
+    const lineEnd = nl === -1 ? text.length : nl;
+    // 라인 시작이 'v '인지 체크 (vt, vn 제외)
+    if (text[idx] === 'v' && text[idx + 1] === ' ') count++;
+    idx = lineEnd + 1;
+  }
+  return count;
+}
+
+function validateAndLoad(file) {
+  // 1) 확장자 체크
+  if (!file.name.toLowerCase().endsWith('.obj')) {
+    showToast('error', '지원하지 않는 파일 형식',
+      '.obj 파일만 업로드 가능합니다. 현재 파일: ' + file.name);
+    return;
+  }
+
+  // 2) 파일 크기 체크
+  const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    showToast('error', '파일이 너무 큽니다',
+      '최대 ' + MAX_FILE_SIZE_MB + 'MB까지 지원됩니다. 현재 파일: ' + sizeMB + 'MB<br>' +
+      '버텍스를 줄여주세요.');
+    return;
+  }
+
+  // 3) 파일 읽기
+  const reader = new FileReader();
+  reader.onerror = function() {
+    showToast('error', '파일 읽기 실패',
+      '파일을 읽는 중 오류가 발생했습니다. 파일이 손상되었을 수 있습니다.');
+    document.getElementById('upload-btn').style.pointerEvents = '';
+  };
+  reader.onload = function(ev) {
+    const text = ev.target.result;
+
+    // 4) 버텍스 수 빠른 카운트
+    const vertCount = quickCountVertices(text);
+
+    // 하드 리밋 초과 → 차단
+    if (vertCount > MAX_VERTEX_COUNT) {
+      showToast('error', '버텍스 수 초과 — 로드 불가',
+        '이 파일의 버텍스: 약 ' + vertCount.toLocaleString() + '개<br>' +
+        '최대 지원: ' + MAX_VERTEX_COUNT.toLocaleString() + '개<br>' +
+        '브라우저 메모리 한계로 로드할 수 없습니다.<br>' +
+        '버텍스를 줄여주세요.', 10000);
+      return;
+    }
+
+    // 소프트 리밋 초과 → 경고 후 진행
+    if (vertCount > WARN_VERTEX_COUNT) {
+      showToast('warn', '대용량 모델 감지',
+        '버텍스 약 ' + vertCount.toLocaleString() + '개 — 로드 및 분석에 시간이 걸릴 수 있습니다.<br>' +
+        '브라우저가 멈추면 탭을 새로고침 해주세요.', 8000);
+    }
+
+    const url = URL.createObjectURL(file);
+    loadModel(url, text);
+  };
+  reader.readAsText(file);
+}
+
+// ── Scene ──
+const viewport = document.getElementById('viewport');
+const W = () => viewport.clientWidth;
+const H = () => viewport.clientHeight;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x232323);
+
+const camera = new THREE.PerspectiveCamera(55, W() / H(), 0.001, 100000);
+camera.position.set(0, 0, 5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(W(), H());
+viewport.appendChild(renderer.domElement);
+
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight.position.set(5, 8, 5);
+scene.add(dirLight);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.15);
+fillLight.position.set(-5, -3, -5);
+scene.add(fillLight);
+
+const grid = new THREE.GridHelper(20, 40, 0x3a3a3a, 0x2e2e2e);
+scene.add(grid);
+
+// ── View Mode ──
+let currentMode = 'wireframe';
+let currentMeshes = [];
+
+function setViewMode(mode, btn) {
+  currentMode = mode;
+  document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  applyViewMode();
+}
+
+function applyViewMode() {
+  currentMeshes.forEach(({ solid, wire }) => {
+    solid.visible = currentMode === 'solid' || currentMode === 'both';
+    wire.visible  = currentMode === 'wireframe' || currentMode === 'both';
+  });
+}
+
+// ── BoundingBox Helper ──
+let bboxHelper = null;
+let bboxVisible = true; // 기본값 ON
+
+function toggleBBoxHelper() {
+  bboxVisible = !bboxVisible;
+  const btn = document.getElementById('bbox-toggle');
+  const lbl = document.getElementById('bbox-toggle-label');
+  if (bboxHelper) bboxHelper.visible = bboxVisible;
+  btn.classList.toggle('active', bboxVisible);
+  lbl.textContent = bboxVisible ? 'ON' : 'OFF';
+  lbl.style.color = bboxVisible ? 'var(--accent)' : 'var(--dim)';
+}
+
+function updateBBoxHelper(object, allVertsBox) {
+  if (bboxHelper) { scene.remove(bboxHelper); bboxHelper = null; }
+  // allVertsBox: OBJ v 라인 전체 좌표 기반 (싱글 버텍스/엣지 포함)
+  // 없으면 Three.js object 기반으로 폴백
+  const box = allVertsBox || new THREE.Box3().setFromObject(object);
+  bboxHelper = new THREE.Box3Helper(box, 0xe87d3e);
+  bboxHelper.visible = bboxVisible;
+  scene.add(bboxHelper);
+}
+const overlayGroup = new THREE.Group();
+scene.add(overlayGroup);
+
+const overlays = {
+  degen:       { group: new THREE.Group(), color: '#ff2222', label: 'Degenerate face',   count: 0 },
+  ngon:        { group: new THREE.Group(), color: '#ff00ff', label: 'N-gon (5각형+)',    count: 0 },
+  dupvert:     { group: new THREE.Group(), color: '#ffdd00', label: '위치 중복 정점',    count: 0 },
+  flipped:     { group: new THREE.Group(), color: '#ff6ec7', label: '뒤집힌 면 (법선)', count: 0 },
+  nonmanifold: { group: new THREE.Group(), color: '#ff2222', label: '비매니폴드 엣지',   count: 0 },
+  boundary:    { group: new THREE.Group(), color: '#ff8c00', label: '열린 경계 엣지',    count: 0 },
+  isolated:    { group: new THREE.Group(), color: '#ff2222', label: '고립 정점',          count: 0 },
+};
+Object.values(overlays).forEach(o => { o.group.visible = true; overlayGroup.add(o.group); });
+
+// ── COLOR THEME SYSTEM ──
+const DEFAULT_COLORS = {};
+Object.entries(overlays).forEach(([k,o]) => { DEFAULT_COLORS[k] = o.color; });
+
+function hexToInt(hex) { return parseInt(hex.replace('#',''), 16); }
+
+function applyOverlayColor(key, hex) {
+  overlays[key].color = hex;
+  const group = overlays[key].group;
+  group.traverse(function(obj) {
+    if (obj.material) {
+      if (Array.isArray(obj.material)) {
+        obj.material.forEach(m => { if (m.color) m.color.set(hex); });
+      } else if (obj.material.color) {
+        obj.material.color.set(hex);
+      }
+    }
+  });
+  // toggle UI dot 색상도 즉시 업데이트
+  const dots = document.querySelectorAll('#overlay-toggles .tog-btn');
+  dots.forEach(function(btn) {
+    const label = btn.querySelector('.tog-label');
+    if (label && label.textContent === overlays[key].label) {
+      const dot = btn.querySelector('.dot');
+      if (dot) dot.style.background = hex;
+    }
+  });
+}
+
+function buildColorThemeUI() {
+  const wrap = document.getElementById('color-entries');
+  wrap.innerHTML = '';
+  Object.entries(overlays).forEach(function([key, o]) {
+    const entry = document.createElement('div');
+    entry.className = 'color-entry';
+    entry.innerHTML =
+      '<span class="color-entry-label">' + o.label + '</span>' +
+      '<div class="color-swatch-wrap">' +
+        '<div class="color-swatch" id="swatch-'+key+'" style="background:'+o.color+'"></div>' +
+        '<input type="color" class="color-input-hidden" id="colorpick-'+key+'" value="'+o.color+'">' +
+      '</div>';
+    wrap.appendChild(entry);
+
+    const input = entry.querySelector('input[type=color]');
+    const swatch = entry.querySelector('.color-swatch');
+
+    input.addEventListener('input', function() {
+      swatch.style.background = input.value;
+      applyOverlayColor(key, input.value);
+    });
+  });
+}
+
+function resetColors() {
+  Object.entries(DEFAULT_COLORS).forEach(function([key, hex]) {
+    applyOverlayColor(key, hex);
+    const input  = document.getElementById('colorpick-' + key);
+    const swatch = document.getElementById('swatch-' + key);
+    if (input)  input.value = hex;
+    if (swatch) swatch.style.background = hex;
+  });
+  showToast('info', '색상 초기화', '기본 색상으로 되돌렸습니다.', 2500);
+}
+
+function randomizeColors() {
+  const palette = [
+    '#ff2d55','#ff9f0a','#ffd60a','#30d158','#64d2ff',
+    '#0a84ff','#bf5af2','#ff6b6b','#4ecdc4','#ffe66d',
+    '#a8e6cf','#ff8b94','#b4f8c8','#fbe7c6','#a0c4ff'
+  ];
+  let idx = 0;
+  const shuffled = palette.sort(() => Math.random() - 0.5);
+  Object.keys(overlays).forEach(function(key) {
+    const hex = shuffled[idx % shuffled.length]; idx++;
+    applyOverlayColor(key, hex);
+    const input  = document.getElementById('colorpick-' + key);
+    const swatch = document.getElementById('swatch-' + key);
+    if (input)  input.value = hex;
+    if (swatch) swatch.style.background = hex;
+  });
+  showToast('info', '랜덤 색상 적용', '새로운 색상 조합으로 변경했습니다.', 2000);
+}
+
+// 초기 UI 빌드
+buildColorThemeUI();
+
+function clearOverlays() {
+  Object.values(overlays).forEach(o => {
+    while (o.group.children.length) {
+      const c = o.group.children[0];
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
+      o.group.remove(c);
+    }
+    o.count = 0;
+  });
+}
+
+function buildToggleUI() {
+  const wrap = document.getElementById('overlay-toggles');
+  const empty = document.getElementById('legend-empty');
+  wrap.innerHTML = '';
+  const hasAny = Object.values(overlays).some(o => o.count > 0);
+  if (!hasAny) {
+    empty.textContent = '문제 있는 요소가 없습니다 ✓';
+    empty.style.display = 'block';
+    wrap.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  wrap.style.display = 'block';
+
+  Object.entries(overlays).forEach(function([key, o]) {
+    if (o.count === 0) return;
+    const btn = document.createElement('button');
+    btn.className = 'tog-btn active';
+    btn.innerHTML =
+      '<span class="dot' + (key==='isolated'?' round':'') + '" style="background:' + o.color + '"></span>' +
+      '<span class="tog-label">' + o.label + '</span> <span style="color:var(--dim);font-family:Consolas,monospace;font-size:11px;">' + o.count + '</span>' +
+      '<span class="tog-status">ON</span>';
+    btn.addEventListener('click', function() {
+      o.group.visible = !o.group.visible;
+      btn.classList.toggle('active', o.group.visible);
+      btn.querySelector('.tog-status').textContent = o.group.visible ? 'ON' : 'OFF';
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+// ── N-gon + UV 경고: OBJ 텍스트 직접 파싱 ──
+// Three.js OBJLoader를 거치면 이미 삼각형화되므로,
+// 파일 원문의 'f' 라인을 직접 읽어야 N-gon 탐지 가능
+let rawObjText = '';  // loadModel에서 채움
+let hasUvInObj  = false;
+
+function parseObjText(text) {
+  rawObjText = text;
+  const lines = text.split('\n');
+  const verts = [];
+  const ngonFaces = [];
+  let ngonCount = 0;
+  let quadCount = 0;
+  let triCount  = 0;
+  hasUvInObj = false;
+
+  // 중복 정점: OBJ v 라인에서 직접 탐지
+  const dupVertIndices = new Set();
+  const coordToFirstIdx = new Map();
+  // f 라인 참조 추적 (고립 정점 탐지용)
+  const referencedVerts = new Set();
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith('vt ')) { hasUvInObj = true; continue; }
+    if (t.startsWith('v ')) {
+      const p = t.split(/\s+/);
+      const x = parseFloat(p[1]), y = parseFloat(p[2]), z = parseFloat(p[3]);
+      verts.push([x, y, z]);
+      const key = x.toFixed(8) + ',' + y.toFixed(8) + ',' + z.toFixed(8);
+      const idx = verts.length - 1;
+      if (coordToFirstIdx.has(key)) {
+        dupVertIndices.add(idx);              // 현재 정점이 중복
+        dupVertIndices.add(coordToFirstIdx.get(key)); // 원본도 중복 쌍으로 표시
+      } else {
+        coordToFirstIdx.set(key, idx);
+      }
+      continue;
+    }
+    if (!t.startsWith('f ')) continue;
+
+    const tokens = t.split(/\s+/).slice(1).filter(Boolean);
+    const vi = tokens.map(tk => {
+      const idx = parseInt(tk.split('/')[0]);
+      return idx > 0 ? idx - 1 : verts.length + idx;
+    });
+
+    if (vi.length === 3)      triCount++;
+    else if (vi.length === 4) quadCount++;
+    else if (vi.length >= 5) {
+      ngonCount++;
+      ngonFaces.push(vi.map(i => verts[i] || [0,0,0]));
+    }
+
+    // f 라인에서 참조된 v 인덱스 수집 (고립 정점 탐지용)
+    vi.forEach(i => referencedVerts.add(i));
+  }
+
+  // ── 진짜 고립 정점: v 라인에 있지만 f 라인에서 한 번도 참조 안 된 정점 ──
+  // OBJLoader는 이런 정점을 geometry에 포함시키지 않아서
+  // Three.js 파이프라인으로는 절대 탐지 불가 → OBJ 텍스트에서만 가능
+  const trueIsolatedPoints = [];
+  for (let i = 0; i < verts.length; i++) {
+    if (!referencedVerts.has(i)) {
+      trueIsolatedPoints.push(...verts[i]);
+    }
+  }
+  const trueIsolatedCount = trueIsolatedPoints.length / 3;
+
+  // 중복 정점 좌표 목록 (오버레이용)
+  const dupVertPoints = [];
+  dupVertIndices.forEach(i => {
+    if (verts[i]) dupVertPoints.push(...verts[i]);
+  });
+
+  return { ngonCount, quadCount, triCount, ngonFaces, verts, dupVertPoints, dupVertCount: dupVertIndices.size, trueIsolatedPoints, trueIsolatedCount };
+}
+
+function buildNgonOverlay(ngonFaces) {
+  // N-gon face를 fan 삼각분할해서 반투명 마젠타 면으로 표시
+  const posArr = [];
+  for (const face of ngonFaces) {
+    const v0 = face[0];
+    for (let i = 1; i < face.length - 1; i++) {
+      posArr.push(...v0, ...face[i], ...face[i+1]);
+    }
+  }
+  if (posArr.length === 0) return;
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(posArr, 3));
+  const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+    color: hexToInt(overlays.ngon.color), side: THREE.DoubleSide,
+    transparent: true, opacity: 0.55, depthTest: false
+  }));
+  overlays.ngon.group.add(mesh);
+
+  // 엣지 라인도 추가
+  const linePos = [];
+  for (const face of ngonFaces) {
+    for (let i = 0; i < face.length; i++) {
+      linePos.push(...face[i], ...face[(i+1) % face.length]);
+    }
+  }
+  const lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.Float32BufferAttribute(linePos, 3));
+  overlays.ngon.group.add(new THREE.LineSegments(lg,
+    new THREE.LineBasicMaterial({ color: hexToInt(overlays.ngon.color), depthTest: false })));
+}
+
+
+function runAnalysis(originalGeometry) {
+  clearOverlays();
+
+  // ── 메시 기반 바운딩 박스 (Three.js geometry 기준) ──
+  originalGeometry.computeBoundingBox();
+  const meshBB = originalGeometry.boundingBox;
+  const meshBBSize = new THREE.Vector3();
+  meshBB.getSize(meshBBSize);
+
+  // ── 진짜 바운딩 박스: OBJ v 라인 전체 좌표 기반 ──
+  // 싱글 버텍스, 싱글 엣지 등 Three.js가 무시하는 데이터까지 포함
+  // 포토샵처럼 레이어 안의 모든 데이터를 포함한 "정직한 바운딩 박스"
+  let trueBB = null;
+  if (rawObjText) {
+    const allVerts = [];
+    rawObjText.split('\n').forEach(function(line) {
+      const t = line.trim();
+      if (!t.startsWith('v ')) return;
+      const p = t.split(/\s+/);
+      const x = parseFloat(p[1]), y = parseFloat(p[2]), z = parseFloat(p[3]);
+      if (!isNaN(x) && !isNaN(y) && !isNaN(z)) allVerts.push(x, y, z);
+    });
+    if (allVerts.length > 0) {
+      trueBB = new THREE.Box3();
+      for (let i = 0; i < allVerts.length; i += 3) {
+        trueBB.expandByPoint(new THREE.Vector3(allVerts[i], allVerts[i+1], allVerts[i+2]));
+      }
+    }
+  }
+
+  const bb = trueBB || meshBB;
+  const bbSize = new THREE.Vector3();
+  bb.getSize(bbSize);
+
+  document.getElementById('bbox').textContent =
+    bbSize.x.toFixed(3) + ' / ' +
+    bbSize.y.toFixed(3) + ' / ' +
+    bbSize.z.toFixed(3);
+
+  // 진짜 BB로 Helper 업데이트
+  if (trueBB) updateBBoxHelper(null, trueBB);
+
+  // BoundingBox 대각선 길이 기준으로 점 크기 비례 계산
+  const bbDiag = bbSize.length();
+  const ptSize = Math.max(bbDiag * 0.012, 0.003);
+
+  // ── Stray Data 경고: 진짜 BB가 메시 BB보다 현저히 크면 ──
+  let strayDataWarning = false;
+  if (trueBB && meshBBSize.length() > 0) {
+    const ratio = bbSize.length() / meshBBSize.length();
+    if (ratio > 1.5) strayDataWarning = true;
+  }
+
+  const rawArr   = originalGeometry.attributes.position.array;
+  const rawVerts = originalGeometry.attributes.position.count;
+  const faceCount = rawVerts / 3;
+
+  // ── mergeVertices(1e-4) → 위상 분석용 indexed geo ──
+  const posOnlyGeo = new THREE.BufferGeometry();
+  posOnlyGeo.setAttribute('position', originalGeometry.attributes.position.clone());
+  let indexedGeo;
+  try { indexedGeo = THREE.BufferGeometryUtils.mergeVertices(posOnlyGeo, 1e-4); }
+  catch(e) { indexedGeo = posOnlyGeo; }
+
+  const mergedVerts = indexedGeo.attributes.position.count;
+  const mpos = indexedGeo.attributes.position.array;
+  const indices = indexedGeo.index ? indexedGeo.index.array : null;
+
+  document.getElementById('v-count').textContent = mergedVerts.toLocaleString() +
+    (rawVerts !== mergedVerts ? ' (렌더: ' + rawVerts.toLocaleString() + ')' : '');
+  document.getElementById('f-count').textContent = Math.round(faceCount).toLocaleString();
+
+  // ── Edge map ──
+  let edgeSt = null;
+  const edgeMap = new Map();
+  if (indices) {
+    const ekey = (a,b) => a<b ? a+'_'+b : b+'_'+a;
+    for (let i = 0; i < indices.length; i += 3) {
+      const pairs = [[indices[i],indices[i+1]],[indices[i+1],indices[i+2]],[indices[i+2],indices[i]]];
+      for (const [a,b] of pairs) { const k=ekey(a,b); edgeMap.set(k,{cnt:(edgeMap.get(k)||{cnt:0}).cnt+1,a,b}); }
+    }
+    let nonManifold=0, boundary=0;
+    edgeMap.forEach(e => { if(e.cnt>2) nonManifold++; else if(e.cnt===1) boundary++; });
+    edgeSt = { nonManifold, boundary, totalEdges: edgeMap.size };
+  }
+
+  document.getElementById('e-count').textContent = edgeSt ? edgeSt.totalEdges.toLocaleString() : '—';
+  if (edgeSt) {
+    const chi = mergedVerts - edgeSt.totalEdges + Math.round(faceCount);
+    document.getElementById('euler').textContent = (chi>=0?'+':'')+chi;
+  }
+
+  // ── Degenerate faces → red mesh overlay ──
+  const degenVerts = [];
+  for (let f = 0; f < faceCount; f++) {
+    const b = f*9;
+    const ax=rawArr[b],ay=rawArr[b+1],az=rawArr[b+2];
+    const bx=rawArr[b+3],by=rawArr[b+4],bz=rawArr[b+5];
+    const cx=rawArr[b+6],cy=rawArr[b+7],cz=rawArr[b+8];
+    const abx=bx-ax,aby=by-ay,abz=bz-az;
+    const acx=cx-ax,acy=cy-ay,acz=cz-az;
+    const crossLen=Math.sqrt(Math.pow(aby*acz-abz*acy,2)+Math.pow(abz*acx-abx*acz,2)+Math.pow(abx*acy-aby*acx,2));
+    if (crossLen < 1e-10) {
+      degenVerts.push(ax,ay,az,bx,by,bz,cx,cy,cz);
+    }
+  }
+  overlays.degen.count = degenVerts.length / 9;
+  if (degenVerts.length > 0) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(degenVerts, 3));
+    // Show as points since face has zero area — use small spheres at each vertex
+    const pts = new THREE.Points(g, new THREE.PointsMaterial({ color: hexToInt(overlays.degen.color), size: ptSize, sizeAttenuation: true, depthTest: false }));
+    overlays.degen.group.add(pts);
+  }
+
+  // ── Non-manifold & boundary edges → LineSegments ──
+  if (indices) {
+    const nmVerts = [], bdVerts = [];
+    edgeMap.forEach(function(e) {
+      const ia=e.a, ib=e.b;
+      const ax=mpos[ia*3],ay=mpos[ia*3+1],az=mpos[ia*3+2];
+      const bx=mpos[ib*3],by=mpos[ib*3+1],bz=mpos[ib*3+2];
+      if (e.cnt > 2)      { nmVerts.push(ax,ay,az,bx,by,bz); }
+      else if (e.cnt===1) { bdVerts.push(ax,ay,az,bx,by,bz); }
+    });
+
+    overlays.nonmanifold.count = nmVerts.length / 6;
+    if (nmVerts.length > 0) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(nmVerts, 3));
+      overlays.nonmanifold.group.add(new THREE.LineSegments(g,
+        new THREE.LineBasicMaterial({ color: hexToInt(overlays.nonmanifold.color), linewidth: 2, depthTest: false })));
+    }
+
+    overlays.boundary.count = bdVerts.length / 6;
+    if (bdVerts.length > 0) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(bdVerts, 3));
+      overlays.boundary.group.add(new THREE.LineSegments(g,
+        new THREE.LineBasicMaterial({ color: hexToInt(overlays.boundary.color), linewidth: 2, depthTest: false })));
+    }
+
+    // ── Isolated vertices → Points ──
+    const used = new Uint8Array(mergedVerts);
+    for (let i = 0; i < indices.length; i++) used[indices[i]] = 1;
+    const isoVerts = [];
+    for (let i = 0; i < mergedVerts; i++) {
+      if (!used[i]) isoVerts.push(mpos[i*3], mpos[i*3+1], mpos[i*3+2]);
+    }
+    overlays.isolated.count = isoVerts.length / 3;
+    if (isoVerts.length > 0) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(isoVerts, 3));
+      overlays.isolated.group.add(new THREE.Points(g,
+        new THREE.PointsMaterial({ color: hexToInt(overlays.isolated.color), size: ptSize, sizeAttenuation: true, depthTest: false })));
+    }
+  }
+
+  // ── Flipped normals (뒤집힌 면) ──
+  // 각 face의 법선과 인접 face들의 법선을 비교
+  // 인접한 face 과반수와 반대 방향이면 뒤집힌 면으로 판정
+  if (indices) {
+    // face별 법선 계산
+    const faceNormals = [];
+    const faceCount2 = indices.length / 3;
+    const n = new THREE.Vector3(), ab2 = new THREE.Vector3(), ac2 = new THREE.Vector3();
+    const pA = new THREE.Vector3(), pB = new THREE.Vector3(), pC = new THREE.Vector3();
+
+    for (let f = 0; f < faceCount2; f++) {
+      const ia = indices[f*3], ib = indices[f*3+1], ic = indices[f*3+2];
+      pA.set(mpos[ia*3], mpos[ia*3+1], mpos[ia*3+2]);
+      pB.set(mpos[ib*3], mpos[ib*3+1], mpos[ib*3+2]);
+      pC.set(mpos[ic*3], mpos[ic*3+1], mpos[ic*3+2]);
+      ab2.subVectors(pB, pA);
+      ac2.subVectors(pC, pA);
+      n.crossVectors(ab2, ac2).normalize();
+      faceNormals.push(n.x, n.y, n.z);
+    }
+
+    // 정점 → 인접 face 목록 맵
+    const vertToFaces = new Map();
+    for (let f = 0; f < faceCount2; f++) {
+      for (let k = 0; k < 3; k++) {
+        const vi = indices[f*3+k];
+        if (!vertToFaces.has(vi)) vertToFaces.set(vi, []);
+        vertToFaces.get(vi).push(f);
+      }
+    }
+
+    // 각 face의 인접 face 찾기 (공유 엣지 기반)
+    const ekey2 = (a,b) => a<b ? a+'_'+b : b+'_'+a;
+    const edgeToFaces = new Map();
+    for (let f = 0; f < faceCount2; f++) {
+      const pairs = [[indices[f*3],indices[f*3+1]],[indices[f*3+1],indices[f*3+2]],[indices[f*3+2],indices[f*3]]];
+      for (const [a,b] of pairs) {
+        const k = ekey2(a,b);
+        if (!edgeToFaces.has(k)) edgeToFaces.set(k, []);
+        edgeToFaces.get(k).push(f);
+      }
+    }
+
+    // face별 인접 face 목록
+    const faceAdj = Array.from({length: faceCount2}, () => new Set());
+    edgeToFaces.forEach(function(faces) {
+      if (faces.length === 2) {
+        faceAdj[faces[0]].add(faces[1]);
+        faceAdj[faces[1]].add(faces[0]);
+      }
+    });
+
+    // 뒤집힌 face 탐지: 인접 face 법선과 내적이 음수인 비율이 과반이면 뒤집힘
+    const flippedVerts = [];
+    for (let f = 0; f < faceCount2; f++) {
+      const nx = faceNormals[f*3], ny = faceNormals[f*3+1], nz = faceNormals[f*3+2];
+      const adj = faceAdj[f];
+      if (adj.size === 0) continue;
+
+      let flippedCount = 0;
+      adj.forEach(function(af) {
+        const dot = nx*faceNormals[af*3] + ny*faceNormals[af*3+1] + nz*faceNormals[af*3+2];
+        if (dot < -0.5) flippedCount++; // 둔각 이상이면 방향이 반대
+      });
+
+      if (flippedCount > adj.size * 0.5) {
+        // 이 face의 세 정점 좌표를 오버레이 배열에 추가
+        const ia = indices[f*3], ib = indices[f*3+1], ic = indices[f*3+2];
+        flippedVerts.push(
+          mpos[ia*3], mpos[ia*3+1], mpos[ia*3+2],
+          mpos[ib*3], mpos[ib*3+1], mpos[ib*3+2],
+          mpos[ic*3], mpos[ic*3+1], mpos[ic*3+2]
+        );
+      }
+    }
+
+    overlays.flipped.count = flippedVerts.length / 9;
+    if (flippedVerts.length > 0) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(flippedVerts, 3));
+      overlays.flipped.group.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+        color: hexToInt(overlays.flipped.color), side: THREE.DoubleSide,
+        transparent: true, opacity: 0.6, depthTest: false
+      })));
+    }
+  }
+  const { ngonCount, quadCount, ngonFaces, dupVertPoints, dupVertCount, trueIsolatedPoints, trueIsolatedCount } = parseObjText(rawObjText);
+  overlays.ngon.count = ngonCount;
+  if (ngonCount > 0) buildNgonOverlay(ngonFaces);
+
+  // 중복 정점 오버레이 (노란 점)
+  overlays.dupvert.count = dupVertCount;
+  if (dupVertPoints.length > 0) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(dupVertPoints, 3));
+    overlays.dupvert.group.add(new THREE.Points(g, new THREE.PointsMaterial({
+      color: hexToInt(overlays.dupvert.color), size: ptSize, sizeAttenuation: true, depthTest: false
+    })));
+  }
+
+  // 진짜 고립 정점 오버레이 (OBJ v 라인 기반 — f에서 한 번도 참조 안 된 정점)
+  // Three.js OBJLoader는 이 정점을 geometry에 포함시키지 않아 파이프라인으로는 탐지 불가
+  overlays.isolated.count = trueIsolatedCount;
+  if (trueIsolatedPoints.length > 0) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(trueIsolatedPoints, 3));
+    overlays.isolated.group.add(new THREE.Points(g, new THREE.PointsMaterial({
+      color: hexToInt(overlays.isolated.color), size: ptSize * 1.5, sizeAttenuation: true, depthTest: false
+    })));
+  }
+
+  // ── Issue list UI ──
+  const realDups = rawVerts - mergedVerts;
+  const issues = [];
+
+  // Stray Data 경고 — 진짜 BB가 메시 BB보다 1.5배 이상 크면
+  if (strayDataWarning) {
+    issues.push({type:'warn', icon:'⚠', text:'Stray Data 감지됨',
+      sub:'바운딩 박스가 메시보다 현저히 큽니다. 고립 정점이나 멀리 떨어진 데이터가 있을 수 있습니다.'});
+  }
+
+  // UV 언렙 경고
+  if (hasUvInObj) {
+    issues.push({type:'warn', icon:'ℹ', text:'UV 데이터 감지됨',
+      sub:'UV 언렙 후 모델은 중복 정점 수치가 높게 나올 수 있습니다. UV 언렙 전 모델로 검사하는 것을 권장합니다.'});
+  }
+
+  if (realDups <= 0) issues.push({type:'ok', icon:'✓', text:'실제 중복 정점 없음', sub:'UV/Normal 분리 정점은 정상입니다'});
+  else               issues.push({type:'warn', icon:'⚠', text:'실제 위치 중복 정점', count: realDups.toLocaleString()+'개'});
+
+  // 완전 동일 위치 중복 정점
+  if (dupVertCount <= 0) {
+    issues.push({type:'ok', icon:'✓', text:'완전 동일 위치 중복 정점 없음'});
+  } else {
+    issues.push({type:'error', icon:'✕', text:'완전 동일 위치 중복 정점', count: dupVertCount.toLocaleString()+'개',
+      sub:'Merge하지 않은 정점. 노말 깨짐/이음새 발생 원인'});
+  }
+
+  // N-gon
+  if (ngonCount === 0 && rawObjText === '') {
+    issues.push({type:'warn', icon:'ℹ', text:'N-gon 검사 불가', sub:'파일을 다시 업로드하면 자동 분석됩니다'});
+  } else if (ngonCount === 0) {
+    issues.push({type:'ok', icon:'✓', text:'N-gon 없음',
+      sub: quadCount > 0 ? '쿼드 ' + quadCount + '개 포함 (정상)' : '전부 삼각형'});
+  } else {
+    issues.push({type:'error', icon:'✕', text:'N-gon (5각형 이상)', count: ngonCount.toLocaleString()+'개',
+      sub:'Blender: 삼각형 변환 끄고 익스포트해야 감지됩니다'});
+  }
+
+  if (overlays.degen.count===0)        issues.push({type:'ok',    icon:'✓', text:'Degenerate face 없음'});
+  else                                  issues.push({type:'error', icon:'✕', text:'Degenerate face (넓이 ≈ 0)', count: overlays.degen.count+'개'});
+
+  if (overlays.flipped.count===0)      issues.push({type:'ok',    icon:'✓', text:'뒤집힌 면 없음'});
+  else                                  issues.push({type:'error', icon:'✕', text:'뒤집힌 면 (법선 반전)', count: overlays.flipped.count+'개',
+    sub:'게임엔진에서 특정 각도에 면이 사라지는 현상의 원인'});
+
+  if (edgeSt) {
+    if (overlays.nonmanifold.count===0) issues.push({type:'ok',    icon:'✓', text:'비매니폴드 엣지 없음'});
+    else                                 issues.push({type:'error', icon:'✕', text:'비매니폴드 엣지', count: overlays.nonmanifold.count+'개'});
+
+    if (overlays.boundary.count===0)    issues.push({type:'ok',    icon:'✓', text:'닫힌 메쉬 (열린 경계 없음)'});
+    else                                 issues.push({type:'warn',  icon:'⚠', text:'열린 경계 엣지', count: overlays.boundary.count+'개', sub:'평면/의상 등은 정상일 수 있음'});
+  } else {
+    issues.push({type:'warn', icon:'⚠', text:'엣지 분석 불가 (머지 실패)'});
+  }
+
+  // 고립 정점 — OBJ 텍스트 기반이라 edgeSt 여부 무관하게 항상 탐지 가능
+  if (trueIsolatedCount === 0) issues.push({type:'ok',   icon:'✓', text:'고립 정점 없음'});
+  else                          issues.push({type:'warn', icon:'⚠', text:'고립 정점 (면에 연결 안 된 단독 정점)', count: trueIsolatedCount+'개',
+    sub:'OBJ v 라인 기반 탐지 — Three.js 파이프라인으로는 감지 불가한 정점'});
+
+  document.getElementById('issue-list').innerHTML = issues.map(function(it) {
+    return '<div class="issue-item '+it.type+'">' +
+      '<span class="issue-icon">'+it.icon+'</span>' +
+      '<span>'+it.text+
+        (it.count ? '<br><span class="issue-count">'+it.count+'</span>' : '')+
+        (it.sub   ? '<br><span class="issue-count">'+it.sub+'</span>' : '')+
+      '</span></div>';
+  }).join('');
+
+  buildToggleUI();
+}
+
+let modelGroup = null;
+
+function setProgress(pct, label) {
+  document.getElementById('progress-wrap').style.display = 'block';
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-label').textContent = label;
+  if (pct >= 100) setTimeout(() => { document.getElementById('progress-wrap').style.display = 'none'; }, 800);
+}
+
+function loadModel(url, rawText) {
+  rawObjText = rawText || '';
+  document.getElementById('upload-btn').style.pointerEvents = 'none';
+  setProgress(10, '파일 로드 중...');
+
+  if (modelGroup) { scene.remove(modelGroup); modelGroup = null; }
+  currentMeshes = [];
+  document.getElementById('drop-overlay').classList.add('hidden');
+
+  // l 라인(Line element)을 제거한 버전으로 OBJLoader에 넘김
+  // l 라인이 f 라인과 같은 오브젝트 안에 있으면 OBJLoader가
+  // 해당 오브젝트 전체를 LineSegments로 처리해서 mesh 분석이 불가능해짐
+  const hasLineElements = /^l\s/m.test(rawObjText);
+  const cleanedObjText = hasLineElements
+    ? rawObjText.split('\n').filter(line => !line.trim().startsWith('l ')).join('\n')
+    : rawObjText;
+
+  // Blob URL로 변환해서 OBJLoader에 전달
+  const cleanedBlob = new Blob([cleanedObjText], { type: 'text/plain' });
+  const cleanedUrl = URL.createObjectURL(cleanedBlob);
+  const loader = new THREE.OBJLoader();
+  loader.load(cleanedUrl, function(obj) {
+    setProgress(50, '분석 중...');
+    modelGroup = new THREE.Group();
+    let firstGeometry = null;
+    // l 라인 포함 파일 안내 (분석은 정상 진행)
+    if (hasLineElements) {
+      document.getElementById('issue-list').innerHTML =
+        '<div class="issue-item warn"><span class="issue-icon">ℹ</span><span>Line element(l) 감지됨<br><span style="color:var(--dim);font-size:10px;">분석에서 제외됩니다. 나머지 메시는 정상 분석됩니다.</span></span></div>';
+    }
+
+    obj.traverse(function(child) {
+      // Line element (l 라인) — 와이어로 표시만 하고 분석 대상에서 제외
+      if (child.isLine && !child.isMesh) {
+        child.material = new THREE.LineBasicMaterial({ color: 0x888888, opacity: 0.5, transparent: true });
+        modelGroup.add(child.clone());
+        return;
+      }
+      if (!child.isMesh) return;
+      child.geometry.computeVertexNormals();
+      if (!firstGeometry) firstGeometry = child.geometry;
+
+      const solidMesh = new THREE.Mesh(child.geometry, new THREE.MeshStandardMaterial({
+        color: 0x4a4a4a, roughness: 0.7, metalness: 0.0, side: THREE.DoubleSide
+      }));
+      const wireMesh = new THREE.Mesh(child.geometry, new THREE.MeshBasicMaterial({
+        color: 0xffffff, wireframe: true, opacity: 0.5, transparent: true
+      }));
+
+      currentMeshes.push({solid: solidMesh, wire: wireMesh});
+      modelGroup.add(solidMesh);
+      modelGroup.add(wireMesh);
+    });
+
+    // mesh가 하나도 없는 경우 (l 라인만 있는 파일 등)
+    if (!firstGeometry) {
+      document.getElementById('issue-list').innerHTML =
+        '<div class="issue-item warn"><span class="issue-icon">⚠</span><span>면(face)이 없는 파일입니다<br><span style="color:var(--dim);font-size:10px;">Line element(l)만 있는 경우 위상 분석이 불가합니다</span></span></div>';
+    }
+
+    scene.add(modelGroup);
+    applyViewMode();
+
+    const box = new THREE.Box3().setFromObject(modelGroup);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    camera.position.copy(center).add(new THREE.Vector3(0, maxDim * 0.5, maxDim * 2.5));
+    controls.target.copy(center);
+    controls.update();
+    grid.position.y = box.min.y;
+    overlayGroup.position.copy(modelGroup.position);
+    overlayGroup.rotation.copy(modelGroup.rotation);
+    overlayGroup.scale.copy(modelGroup.scale);
+    // BBoxHelper는 runAnalysis에서 OBJ 전체 v 좌표 기반으로 업데이트
+
+    setProgress(80, '위상 분석 중...');
+    setTimeout(function() {
+      try {
+        if (firstGeometry) runAnalysis(firstGeometry);
+      } catch(e) {
+        console.error('분석 오류:', e);
+        document.getElementById('issue-list').innerHTML =
+          '<div class="issue-item error"><span class="issue-icon">✕</span><span>분석 중 오류가 발생했습니다</span></div>';
+      }
+      setProgress(100, '완료');
+      document.getElementById('upload-btn').style.pointerEvents = '';
+      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(cleanedUrl);
+    }, 50);
+
+  }, function(xhr) {
+    if (xhr.total) setProgress(10 + (xhr.loaded / xhr.total) * 40, '로드 중...');
+  }, function(err) {
+    console.error(err);
+    document.getElementById('issue-list').innerHTML =
+      '<div class="issue-item error"><span class="issue-icon">✕</span><span>파일 로드 실패</span></div>';
+    document.getElementById('upload-btn').style.pointerEvents = '';
+  });
+}
+
+document.getElementById('file-upload').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  validateAndLoad(file);
+  e.target.value = '';
+});
+
+viewport.addEventListener('dragover', function(e) { e.preventDefault(); viewport.classList.add('drag-hover'); });
+viewport.addEventListener('dragleave', function(e) { viewport.classList.remove('drag-hover'); });
+viewport.addEventListener('drop', function(e) {
+  e.preventDefault();
+  viewport.classList.remove('drag-hover');
+  const file = e.dataTransfer.files[0];
+  if (!file || !file.name.toLowerCase().endsWith('.obj')) return;
+  validateAndLoad(file);
+});
+
+// ── Render ──
+(function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+
+window.addEventListener('resize', function() {
+  camera.aspect = W() / H();
+  camera.updateProjectionMatrix();
+  renderer.setSize(W(), H());
+});
+</script>
+</body>
+</html>
